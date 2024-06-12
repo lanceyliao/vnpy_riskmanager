@@ -22,7 +22,7 @@ class SymbolRestriction(RiskEngine):
         #             代码中控制启动白名单or黑名单模块。
 
         # 2. 判断是否在白名单/黑名单中，如果不在白名单，直接drop掉（或者如果在黑名单，直接drop掉）
-        symbol = req.vt_symbol.split(".")[0]
+        symbol = req.vt_symbol.rsplit(".", 1)[0]
         if self.restrict_by_white_list and symbol not in self.restriction_list:
             self.write_log(f"{symbol}不在白名单中，直接drop掉")
             return False

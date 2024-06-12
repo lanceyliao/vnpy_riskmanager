@@ -53,14 +53,14 @@ class RiskEngine(BaseEngine):
         #     # encoding='utf-8',
         #     echo=False
         # )
-        #
-        # self.plugin_count = 0
-        # self.init_plugin_count = 0
-        # self.load_check_risk_plugin()
-        # # 执行init_plugin方法（1、2、...）
-        # if self.init_plugin_count > 0:
-        #     for i in range(1, self.init_plugin_count + 1):
-        #         getattr(self, f'init_plugin_{i}')(self)
+
+        self.plugin_count = 0
+        self.init_plugin_count = 0
+        self.load_check_risk_plugin()
+        # 执行init_plugin方法（1、2、...）
+        if self.init_plugin_count > 0:
+            for i in range(1, self.init_plugin_count + 1):
+                getattr(self, f'init_plugin_{i}')(self)
 
         self.order_size_limit: int = 100# 单笔委托上限（数量）
 
