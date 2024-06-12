@@ -2,6 +2,7 @@ from collections import defaultdict
 from typing import Callable, Dict, Optional, List
 
 from vnpy.event import Event, EventEngine
+from vnpy.trader.gateway import BaseGateway
 from vnpy.trader.object import OrderData, OrderRequest, LogData, TradeData, PositionData, AccountData
 from vnpy.trader.engine import BaseEngine, MainEngine
 from vnpy.trader.event import EVENT_TRADE, EVENT_ORDER, EVENT_LOG, EVENT_TIMER
@@ -11,6 +12,8 @@ from vnpy.trader.utility import load_json, save_json
 from sqlalchemy import create_engine, text
 from urllib.parse import quote_plus as urlquote
 from datetime import datetime
+
+from vnpy_ctp.gateway.ctp_gateway import CtpTdApi
 
 APP_NAME = "RiskManager"
 
@@ -193,23 +196,35 @@ class RiskEngine(BaseEngine):
         #     self.save_positions()
 
     def get_balance(self) -> float:
-        # # 法1
+        # 法1
         # self.accs: Dict[str, AccountData] = self.main_engine.get_engine('oms').accounts
-        # # 法2
-        # self.accs_value: List[AccountData] = self.main_engine.get_all_accounts()
-        # # 法3
-        # gateway_name = 'CTP'
-        # accountid = '123456'
-        # vt_accountid = f"{gateway_name}.{accountid}"
-        # self.acc: Optional[AccountData] = self.main_engine.get_account(vt_accountid)
 
-        accs_value: List[AccountData] = self.main_engine.get_all_accounts()
-        # 如果账户数量为0，返回0
-        if len(accs_value) == 0:
+
+        # 法2
+        # accs_value: List[AccountData] = self.main_engine.get_all_accounts()
+        # # 如果账户数量为0，返回0
+        # if len(accs_value) == 0:
+        #     return 0
+        # # 如果账户数量不为0，返回账户权益
+        # return accs_value[0].balance
+
+
+        # # 法3
+        gateway_name: str = 'CTP'
+        # accountid = '123456'
+        accountid: str = self.get_accountid()
+        vt_accountid: str = f"{gateway_name}.{accountid}"
+        self.acc: Optional[AccountData] = self.main_engine.get_account(vt_accountid)
+        if not self.acc:
             return 0
-        # 如果账户数量不为0，返回账户权益
-        return accs_value[0].balance
-        # fixme: 从connect_ctp.json的配置中获取账户号
+        return self.acc.balance
+
+    def get_accountid(self) -> str:
+        gateway_name: str = 'CTP'
+        gateway: BaseGateway = self.main_engine.get_gateway(gateway_name)
+        td_api: "CtpTdApi" = gateway.td_api
+        accountid: str = td_api.userid
+        return accountid
 
     def save_positions(self) -> None:
         self.positions: List[PositionData] = self.main_engine.get_all_positions()
