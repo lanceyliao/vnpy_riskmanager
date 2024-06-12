@@ -1,13 +1,16 @@
 from collections import defaultdict
-from typing import Callable, Dict, Optional
+from typing import Callable, Dict, Optional, List
 
 from vnpy.event import Event, EventEngine
-from vnpy.trader.object import OrderData, OrderRequest, LogData, TradeData
+from vnpy.trader.object import OrderData, OrderRequest, LogData, TradeData, PositionData, AccountData
 from vnpy.trader.engine import BaseEngine, MainEngine
 from vnpy.trader.event import EVENT_TRADE, EVENT_ORDER, EVENT_LOG, EVENT_TIMER
 from vnpy.trader.constant import Direction, Status
 from vnpy.trader.utility import load_json, save_json
 
+from sqlalchemy import create_engine, text
+from urllib.parse import quote_plus as urlquote
+from datetime import datetime
 
 APP_NAME = "RiskManager"
 
@@ -24,20 +27,47 @@ class RiskEngine(BaseEngine):
         self.active: bool = False
 
         self.order_flow_count: int = 0
-        self.order_flow_limit: int = 50
+        self.order_flow_limit: int = 50# 委托流控上限（笔）
 
-        self.order_flow_clear: int = 1
+        self.order_flow_clear: int = 1# 委托流控清空（秒）
         self.order_flow_timer: int = 0
 
-        self.order_size_limit: int = 100
+        # self.position_timer: int = 0
+        # self.position_flash: int = 120# 持仓刷新（秒）
+        #
+        # userName = 'root'
+        # password = 'p0o9i8u7'
+        # dbHost = 'localhost'
+        # dbPort = 3306
+        # dbName = 'scout'
+        # DB_CONNECT = f'mysql+pymysql://{userName}:{urlquote(password)}@{dbHost}:{dbPort}/{dbName}?charset=utf8'
+        # self.mysql_engine = create_engine(
+        #     DB_CONNECT,
+        #     max_overflow=50,  # 超过连接池大小外最多创建的连接
+        #     pool_size=50,  # 连接池大小
+        #     pool_timeout=5,  # 池中没有线程最多等待的时间，否则报错
+        #     pool_recycle=-1,  # 多久之后对线程池中的线程进行一次连接的回收（重置）
+        #     # encoding='utf-8',
+        #     echo=False
+        # )
+        #
+        # self.plugin_count = 0
+        # self.init_plugin_count = 0
+        # self.load_check_risk_plugin()
+        # # 执行init_plugin方法（1、2、...）
+        # if self.init_plugin_count > 0:
+        #     for i in range(1, self.init_plugin_count + 1):
+        #         getattr(self, f'init_plugin_{i}')(self)
+
+        self.order_size_limit: int = 100# 单笔委托上限（数量）
 
         self.trade_count: int = 0
-        self.trade_limit: int = 1000
+        self.trade_limit: int = 1000# 总成交上限（笔）
 
-        self.order_cancel_limit: int = 500
+        self.order_cancel_limit: int = 500# 合约撤单上限（笔）
         self.order_cancel_counts: Dict[str, int] = defaultdict(int)
 
-        self.active_order_limit: int = 50
+        self.active_order_limit: int = 50# 活动委托上限（笔）
 
         self.active_order_books: Dict[str, ActiveOrderBook] = {}
 
@@ -58,7 +88,33 @@ class RiskEngine(BaseEngine):
         if not result:
             return ""
 
+        # 执行风控插件（1、2、...）
+        if self.plugin_count > 0:
+            for i in range(1, self.plugin_count + 1):
+                result: bool = getattr(self, f'check_risk_{i}')(self, req, gateway_name)
+                if not result:
+                    self.write_log(f"风控插件{i}拦截此笔委托")
+                    return ""
+
         return self._send_order(req, gateway_name)
+
+    def load_check_risk_plugin(self):
+        import inspect, os, importlib
+        from glob import glob
+        # 导入plugin目录下的所有.py文件中，RiskEngine的子类的check_risk方法并按顺序赋予别名
+        for f in glob(os.path.join(os.path.dirname(__file__), 'plugin', '*.py')):
+            module_name = os.path.basename(f)[:-3]
+            module = importlib.import_module(f'vnpy_riskmanager.plugin.{module_name}')
+            for name, obj in inspect.getmembers(module):
+                if inspect.isclass(obj) and issubclass(obj, RiskEngine) and obj is not RiskEngine:
+                    self.plugin_count += 1
+                    # 如果RiskEngine的子类的init_plugin方法存在，赋予别名
+                    if hasattr(obj, 'init_plugin'):
+                        self.init_plugin_count += 1
+                        setattr(self, f'init_plugin_{self.init_plugin_count}', obj.init_plugin)
+                    setattr(self, f'check_risk_{self.plugin_count}', obj.check_risk)
+                    self.write_log(f"风控插件{name}加载成功")
+        self.write_log(f"风控插件加载成功，共加载{self.plugin_count}个插件")
 
     def update_setting(self, setting: dict) -> None:
         """"""
@@ -78,13 +134,13 @@ class RiskEngine(BaseEngine):
     def get_setting(self) -> dict:
         """"""
         setting: dict = {
-            "active": self.active,
-            "order_flow_limit": self.order_flow_limit,
-            "order_flow_clear": self.order_flow_clear,
-            "order_size_limit": self.order_size_limit,
-            "trade_limit": self.trade_limit,
-            "active_order_limit": self.active_order_limit,
-            "order_cancel_limit": self.order_cancel_limit,
+            "active": self.active,# 风控运行状态
+            "order_flow_limit": self.order_flow_limit,# 委托流控上限（笔）
+            "order_flow_clear": self.order_flow_clear,# 委托流控清空（秒）
+            "order_size_limit": self.order_size_limit,# 单笔委托上限（数量）
+            "trade_limit": self.trade_limit,# 总成交上限（笔）
+            "active_order_limit": self.active_order_limit,# 活动委托上限（笔）
+            "order_cancel_limit": self.order_cancel_limit,# 合约撤单上限（笔）
         }
         return setting
 
@@ -130,6 +186,62 @@ class RiskEngine(BaseEngine):
         if self.order_flow_timer >= self.order_flow_clear:
             self.order_flow_count = 0
             self.order_flow_timer = 0
+
+        # self.position_timer += 1
+        # if self.position_timer >= self.position_flash:
+        #     self.position_timer = 0
+        #     self.save_positions()
+
+    def get_balance(self) -> float:
+        # # 法1
+        # self.accs: Dict[str, AccountData] = self.main_engine.get_engine('oms').accounts
+        # # 法2
+        # self.accs_value: List[AccountData] = self.main_engine.get_all_accounts()
+        # # 法3
+        # gateway_name = 'CTP'
+        # accountid = '123456'
+        # vt_accountid = f"{gateway_name}.{accountid}"
+        # self.acc: Optional[AccountData] = self.main_engine.get_account(vt_accountid)
+
+        accs_value: List[AccountData] = self.main_engine.get_all_accounts()
+        # 如果账户数量为0，返回0
+        if len(accs_value) == 0:
+            return 0
+        # 如果账户数量不为0，返回账户权益
+        return accs_value[0].balance
+        # fixme: 从connect_ctp.json的配置中获取账户号
+
+    def save_positions(self) -> None:
+        self.positions: List[PositionData] = self.main_engine.get_all_positions()
+        self.save_mysql(self.positions)
+
+    # 根据vt_symbol获取对应的持仓列表
+    def get_symbol_positions(self, vt_symbol) -> List[PositionData]:
+        self.positions: List[PositionData] = self.main_engine.get_all_positions()
+        return [position for position in self.positions if position.vt_symbol == vt_symbol and position.volume != 0]
+
+    def save_mysql(self, positions) -> None:
+        # 1.删除
+        sql = f"delete from user_position where user='zhongxin'"
+        with self.mysql_engine.connect() as conn:
+            conn.execute(text(sql))
+            conn.commit()
+            self.write_log(f"持仓数据删除成功：{sql}")
+        # 2.检查position数量，如果为0，直接返回；如果不为0，批量插入
+        if len(positions) == 0:
+            return
+        # 3.批量插入
+        sql = f"insert into user_position(user,symbol,direction,volume,remarks,create_date,price,yd_volume,frozen) values"
+        create_date = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        for position in positions:
+            # 如果持仓不为0，插入
+            if position.volume != 0:
+                sql += f"('zhongxin','{position.vt_symbol}','{position.direction.value}','{position.volume}',null,'{create_date}','{position.price}','{position.yd_volume}','0'),"
+        sql = sql[:-1]
+        with self.mysql_engine.connect() as conn:
+            conn.execute(text(sql))
+            conn.commit()
+            self.write_log(f"持仓数据保存成功：{sql}")
 
     def write_log(self, msg: str) -> None:
         """"""
