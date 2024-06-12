@@ -1,6 +1,6 @@
 from collections import defaultdict
 from typing import Callable, Dict, Optional, List
-
+from types import MethodType
 from vnpy.event import Event, EventEngine
 from vnpy.trader.gateway import BaseGateway
 from vnpy.trader.object import OrderData, OrderRequest, LogData, TradeData, PositionData, AccountData
@@ -60,7 +60,7 @@ class RiskEngine(BaseEngine):
         # 执行init_plugin方法（1、2、...）
         if self.init_plugin_count > 0:
             for i in range(1, self.init_plugin_count + 1):
-                getattr(self, f'init_plugin_{i}')(self)
+                getattr(self, f'init_plugin_{i}')()
 
         self.order_size_limit: int = 100# 单笔委托上限（数量）
 
@@ -94,7 +94,7 @@ class RiskEngine(BaseEngine):
         # 执行风控插件（1、2、...）
         if self.plugin_count > 0:
             for i in range(1, self.plugin_count + 1):
-                result: bool = getattr(self, f'check_risk_{i}')(self, req, gateway_name)
+                result: bool = getattr(self, f'check_risk_{i}')(req, gateway_name)
                 if not result:
                     self.write_log(f"风控插件{i}拦截此笔委托")
                     return ""
@@ -114,8 +114,8 @@ class RiskEngine(BaseEngine):
                     # 如果RiskEngine的子类的init_plugin方法存在，赋予别名
                     if hasattr(obj, 'init_plugin'):
                         self.init_plugin_count += 1
-                        setattr(self, f'init_plugin_{self.init_plugin_count}', obj.init_plugin)
-                    setattr(self, f'check_risk_{self.plugin_count}', obj.check_risk)
+                        setattr(self, f'init_plugin_{self.init_plugin_count}', MethodType(obj.init_plugin, self))
+                    setattr(self, f'check_risk_{self.plugin_count}', MethodType(obj.check_risk, self))
                     self.write_log(f"风控插件{name}加载成功")
         self.write_log(f"风控插件加载成功，共加载{self.plugin_count}个插件")
 
