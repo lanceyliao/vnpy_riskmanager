@@ -9,10 +9,10 @@ class SymbolRestriction(RiskEngine):
         self.restrict_by_white_list = True
         # 1. 读取配置文件，获取白名单、黑名单
         if self.restrict_by_white_list:
-            self.restriction_list = load_json("white_list.json")['white_list']
+            self.restriction_list = load_json("white_list.json").get('white_list', [])
             self.write_log(f"使用白名单模块，白名单：{self.restriction_list}")
         else:
-            self.restriction_list = load_json("black_list.json")['black_list']
+            self.restriction_list = load_json("black_list.json").get('black_list', [])
             self.write_log(f"使用黑名单模块，黑名单：{self.restriction_list}")
 
     def check_risk(self, req: OrderRequest, gateway_name: str) -> bool:
