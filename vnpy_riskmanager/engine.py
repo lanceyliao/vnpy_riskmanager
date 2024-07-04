@@ -115,6 +115,9 @@ class RiskEngine(BaseEngine):
                     if hasattr(obj, 'init_plugin'):
                         self.init_plugin_count += 1
                         setattr(self, f'init_plugin_{self.init_plugin_count}', MethodType(obj.init_plugin, self))
+                    if hasattr(obj, 'process_trade_event_'):
+                        setattr(self, f'process_trade_event_{self.plugin_count}', MethodType(obj.process_trade_event_, self))
+                        self.event_engine.register(EVENT_TRADE, getattr(self, f'process_trade_event_{self.plugin_count}'))
                     setattr(self, f'check_risk_{self.plugin_count}', MethodType(obj.check_risk, self))
                     self.write_log(f"风控插件{name}加载成功")
         self.write_log(f"风控插件加载成功，共加载{self.plugin_count}个插件")
