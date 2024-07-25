@@ -26,6 +26,7 @@ class SymbolIntradayMaxOpen(RiskEngine):
         if symbol in self.contract_max_open and self.contract_max_open[symbol] <= 0:
             self.write_log(f"{symbol}当日开仓量已达上限")
             return False
+        return True
 
     def process_trade_event_(self, event: Event) -> None:
         """"""
