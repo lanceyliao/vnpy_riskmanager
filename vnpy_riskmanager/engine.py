@@ -30,9 +30,9 @@ class RiskEngine(BaseEngine):
         self.active: bool = False
 
         self.order_flow_count: int = 0
-        self.order_flow_limit: int = 50# 委托流控上限（笔）
+        self.order_flow_limit: int = 50  # 委托流控上限（笔）
 
-        self.order_flow_clear: int = 1# 委托流控清空（秒）
+        self.order_flow_clear: int = 1  # 委托流控清空（秒）
         self.order_flow_timer: int = 0
 
         # self.position_timer: int = 0
@@ -62,15 +62,15 @@ class RiskEngine(BaseEngine):
             for i in range(1, self.init_plugin_count + 1):
                 getattr(self, f'init_plugin_{i}')()
 
-        self.order_size_limit: int = 100# 单笔委托上限（数量）
+        self.order_size_limit: int = 100  # 单笔委托上限（数量）
 
         self.trade_count: int = 0
-        self.trade_limit: int = 1000# 总成交上限（笔）
+        self.trade_limit: int = 10000  # 总成交上限（笔）
 
-        self.order_cancel_limit: int = 500# 合约撤单上限（笔）
+        self.order_cancel_limit: int = 500  # 合约撤单上限（笔）
         self.order_cancel_counts: Dict[str, int] = defaultdict(int)
 
-        self.active_order_limit: int = 50# 活动委托上限（笔）
+        self.active_order_limit: int = 500  # 活动委托上限（笔）
 
         self.active_order_books: Dict[str, ActiveOrderBook] = {}
 
@@ -101,24 +101,44 @@ class RiskEngine(BaseEngine):
 
         return self._send_order(req, gateway_name)
 
-    def load_check_risk_plugin(self):
-        import inspect, os, importlib
+    def load_check_risk_plugin(self, folder_path: str = ""):
+        """
+        Load risk plugin class from source code.
+
+        Parameters
+        ----------
+        folder_path : str
+            指定加载运行目录相对路径（如"risk_plugins"），为空则从默认目录加载
+        """
+        import importlib
+        from pathlib import Path
         from glob import glob
-        # 导入plugin目录下的所有.py文件中，RiskEngine的子类的check_risk方法并按顺序赋予别名
-        for f in glob(os.path.join(os.path.dirname(__file__), 'plugin', '*.py')):
-            module_name = os.path.basename(f)[:-3]
-            module = importlib.import_module(f'vnpy_riskmanager.plugin.{module_name}')
-            for name, obj in inspect.getmembers(module):
-                if inspect.isclass(obj) and issubclass(obj, RiskEngine) and obj is not RiskEngine:
+        from types import MethodType
+
+        # 若指定目录则从指定目录加载，否则从默认目录加载
+        if folder_path:
+            plugin_path = Path.cwd().joinpath(folder_path)
+            module_prefix = folder_path
+        else:
+            plugin_path = Path(__file__).parent.joinpath("plugin")
+            module_prefix = "vnpy_riskmanager.plugin"
+
+        for filepath in glob(str(plugin_path.joinpath("*.py"))):
+            module_name = f"{module_prefix}.{Path(filepath).stem}"
+            module = importlib.import_module(module_name)
+            for name in dir(module):
+                value = getattr(module, name)
+                if isinstance(value, type) and issubclass(value, RiskEngine) and value is not RiskEngine:
                     self.plugin_count += 1
-                    # 如果RiskEngine的子类的init_plugin方法存在，赋予别名
-                    if hasattr(obj, 'init_plugin'):
+                    if hasattr(value, 'init_plugin'):
                         self.init_plugin_count += 1
-                        setattr(self, f'init_plugin_{self.init_plugin_count}', MethodType(obj.init_plugin, self))
-                    if hasattr(obj, 'process_trade_event_'):
-                        setattr(self, f'process_trade_event_{self.plugin_count}', MethodType(obj.process_trade_event_, self))
-                        self.event_engine.register(EVENT_TRADE, getattr(self, f'process_trade_event_{self.plugin_count}'))
-                    setattr(self, f'check_risk_{self.plugin_count}', MethodType(obj.check_risk, self))
+                        setattr(self, f'init_plugin_{self.init_plugin_count}', MethodType(value.init_plugin, self))
+                    if hasattr(value, 'process_trade_event_'):
+                        setattr(self, f'process_trade_event_{self.plugin_count}',
+                                MethodType(value.process_trade_event_, self))
+                        self.event_engine.register(EVENT_TRADE,
+                                                   getattr(self, f'process_trade_event_{self.plugin_count}'))
+                    setattr(self, f'check_risk_{self.plugin_count}', MethodType(value.check_risk, self))
                     self.write_log(f"风控插件{name}加载成功")
         self.write_log(f"风控插件加载成功，共加载{self.plugin_count}个插件")
 
@@ -140,13 +160,13 @@ class RiskEngine(BaseEngine):
     def get_setting(self) -> dict:
         """"""
         setting: dict = {
-            "active": self.active,# 风控运行状态
-            "order_flow_limit": self.order_flow_limit,# 委托流控上限（笔）
-            "order_flow_clear": self.order_flow_clear,# 委托流控清空（秒）
-            "order_size_limit": self.order_size_limit,# 单笔委托上限（数量）
-            "trade_limit": self.trade_limit,# 总成交上限（笔）
-            "active_order_limit": self.active_order_limit,# 活动委托上限（笔）
-            "order_cancel_limit": self.order_cancel_limit,# 合约撤单上限（笔）
+            "active": self.active,  # 风控运行状态
+            "order_flow_limit": self.order_flow_limit,  # 委托流控上限（笔）
+            "order_flow_clear": self.order_flow_clear,  # 委托流控清空（秒）
+            "order_size_limit": self.order_size_limit,  # 单笔委托上限（数量）
+            "trade_limit": self.trade_limit,  # 总成交上限（笔）
+            "active_order_limit": self.active_order_limit,  # 活动委托上限（笔）
+            "order_cancel_limit": self.order_cancel_limit,  # 合约撤单上限（笔）
         }
         return setting
 
@@ -198,10 +218,9 @@ class RiskEngine(BaseEngine):
         #     self.position_timer = 0
         #     self.save_positions()
 
-    def get_balance(self) -> float:
+    def get_balance(self, gateway_name: str = "CTP") -> float:
         # 法1
         # self.accs: Dict[str, AccountData] = self.main_engine.get_engine('oms').accounts
-
 
         # 法2
         # accs_value: List[AccountData] = self.main_engine.get_all_accounts()
@@ -211,23 +230,60 @@ class RiskEngine(BaseEngine):
         # # 如果账户数量不为0，返回账户权益
         # return accs_value[0].balance
 
+        # 法3
+        # # accountid = '123456'
+        # accountid: str = self.get_accountid()
+        # vt_accountid: str = f"{gateway_name}.{accountid}"
+        # self.acc: Optional[AccountData] = self.main_engine.get_account(vt_accountid)
+        # if not self.acc:
+        #     return 0
+        # return self.acc.balance
 
-        # # 法3
-        gateway_name: str = 'CTP'
-        # accountid = '123456'
-        accountid: str = self.get_accountid()
-        vt_accountid: str = f"{gateway_name}.{accountid}"
-        self.acc: Optional[AccountData] = self.main_engine.get_account(vt_accountid)
-        if not self.acc:
+        # 法4：兼容版
+        # 获取vt_accountid
+        vt_accountid = self.get_vt_accountid(gateway_name)
+        if not vt_accountid:
             return 0
-        return self.acc.balance
 
-    def get_accountid(self) -> str:
-        gateway_name: str = 'CTP'
-        gateway: BaseGateway = self.main_engine.get_gateway(gateway_name)
-        td_api: "CtpTdApi" = gateway.td_api
-        accountid: str = td_api.userid
-        return accountid
+        # 获取账户信息
+        account = self.main_engine.get_account(vt_accountid)
+
+        if not account:
+            self.write_log(f"找不到账户{vt_accountid}")
+            return 0
+
+        return account.balance
+
+    # def get_accountid(self) -> str:
+    #     gateway_name: str = 'CTP'
+    #     gateway: BaseGateway = self.main_engine.get_gateway(gateway_name)
+    #     td_api: "CtpTdApi" = gateway.td_api
+    #     accountid: str = td_api.userid
+    #     return accountid
+
+    def get_vt_accountid(self, gateway_name: str = "CTP") -> str:
+        if gateway_name == "BINANCE_LINEAR":
+            return f"{gateway_name}.USDT"
+
+        elif gateway_name == "CTP":
+            gateway: BaseGateway = self.main_engine.get_gateway(gateway_name)
+            if not gateway:
+                self.write_log(f"找不到网关{gateway_name}")
+                return ""
+            td_api: "CtpTdApi" = gateway.td_api
+            accountid: str = td_api.userid
+            return f"{gateway_name}.{accountid}"
+
+        else:
+            # 其他网关从账户列表中获取
+            accounts: List[AccountData] = self.main_engine.get_all_accounts()
+            gateway_accounts = [acc for acc in accounts if acc.gateway_name == gateway_name]
+
+            if not gateway_accounts:
+                self.write_log(f"找不到网关{gateway_name}的账户")
+                return ""
+
+            return gateway_accounts[0].vt_accountid
 
     def save_positions(self) -> None:
         self.positions: List[PositionData] = self.main_engine.get_all_positions()
