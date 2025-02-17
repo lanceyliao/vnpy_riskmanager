@@ -205,6 +205,7 @@ class RecorderEngine(BaseEngine):
                         # 移除不需要的字段
                         d.pop("gateway_name", None)
                         d.pop("vt_symbol", None)
+                        d.pop("open_interest_value", None)
                         
                         agg_bars.append(d)
 
