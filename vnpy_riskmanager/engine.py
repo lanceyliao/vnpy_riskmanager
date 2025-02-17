@@ -201,9 +201,8 @@ class RiskEngine(BaseEngine):
         order_book: ActiveOrderBook = self.get_order_book(order.vt_symbol)
         order_book.update_order(order)
 
-        if order.status != Status.CANCELLED:
-            return
-        self.order_cancel_counts[order.vt_symbol] += 1
+        if order.status == Status.CANCELLED:
+            self.order_cancel_counts[order.vt_symbol] += 1
 
         # 如果订单被拒绝,记录拒单信息并发送至recorder_engine
         if order.status == Status.REJECTED:
