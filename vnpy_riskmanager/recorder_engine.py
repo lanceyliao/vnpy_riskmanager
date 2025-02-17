@@ -11,10 +11,10 @@ from vnpy.event import Event, EventEngine
 from vnpy.trader.engine import BaseEngine, MainEngine
 from vnpy.trader.object import BarData, BaseData
 from vnpy.trader.event import EVENT_TIMER#, EVENT_BAR_AGG
-from vnpy.trader.database import get_database
+from vnpy.trader.database import get_database, convert_tz
 from vnpy.trader.constant import Exchange, Interval
 from vnpy.trader.object import BarData, TickData
-from vnpy.trader.utility import save_json, load_json, virtual, convert_tz
+from vnpy.trader.utility import save_json, load_json, virtual
 from peewee import CharField, DateTimeField, FloatField, Model, IntegerField
 from dataclasses import dataclass
 from peewee import chunked
@@ -71,9 +71,9 @@ class AggregatedBarOverview(Model):
 class OrderError(Model):
     symbol = CharField()
     exchange = CharField()
-    orderid = CharField(null=True)
+    orderid = CharField()
     create_date = DateTimeField(default=datetime.now())
-    error_code = CharField()
+    error_code = IntegerField()
     error_msg = CharField()
     username = CharField(null=True)
     todo_id = CharField(null=True)
@@ -91,7 +91,7 @@ class OrderError(Model):
 class OrderErrorData(BaseData):
     symbol: str
     exchange: Exchange
-    error_code: str
+    error_code: int
     error_msg: str
     orderid: str = None
     create_date: datetime = datetime.now()
@@ -242,14 +242,15 @@ class RecorderEngine(BaseEngine):
                     overview.save()
                 elif task_type == "order_error":
                     error = data
-                    order_error = {
-                        'symbol': error.symbol,
-                        'exchange': error.exchange.value,
-                        'error_code': error.error_code,
-                        'error_msg': error.error_msg,
-                        'orderid': error.orderid,
-                    }
-                    OrderError.insert(order_error).on_conflict_replace().execute()
+                    # 使用__dict__转换数据
+                    d = error.__dict__
+                    d["exchange"] = d["exchange"].value
+                    
+                    # 移除不需要的字段
+                    d.pop("gateway_name", None)  # 因为BaseData中有这个字段
+                    d.pop("vt_symbol", None)     # 如果有的话
+                    
+                    OrderError.insert(d).on_conflict_replace().execute()
 
             except Empty:
                 continue

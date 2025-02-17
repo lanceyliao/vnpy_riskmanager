@@ -20,12 +20,19 @@ class SymbolIntradayMaxOpen(RiskEngine):
             if s.isdigit():
                 pre = symbol[:i]
                 break
+
         if pre in self.symbol_max_open and self.symbol_max_open[pre] <= 0:
-            self.write_log(f"{pre}当日开仓量已达上限")
+            msg = f"{pre}当日开仓量已达上限"
+            self.write_log(msg)
+            self.record_order_error(req, msg, gateway_name)
             return False
+
         if symbol in self.contract_max_open and self.contract_max_open[symbol] <= 0:
-            self.write_log(f"{symbol}当日开仓量已达上限")
+            msg = f"{symbol}当日开仓量已达上限"
+            self.write_log(msg)
+            self.record_order_error(req, msg, gateway_name)
             return False
+
         return True
 
     def process_trade_event_(self, event: Event) -> None:

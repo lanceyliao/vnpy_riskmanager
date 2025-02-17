@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, List
 
 from vnpy.trader.constant import Direction
 from vnpy.trader.object import OrderRequest, TradeData, OrderData, PositionData
@@ -68,22 +68,22 @@ class SymbolFrozen(RiskEngine):
         # 2.获取当前持仓占用资金（各条持仓信息的：持仓数量*持仓方向*持仓均价*合约乘数 加总）
         frozen: float = 0
         for position in positions:
-            if position.direction == Direction.LONG:
-                direction = 1
-            elif position.direction == Direction.SHORT:
-                direction = -1
-            else:
-                direction = 0
+            direction = 1 if position.direction == Direction.LONG else -1 if position.direction == Direction.SHORT else 0
             frozen += position.volume * direction * position.price
         frozen = abs(frozen * all_sizes[symbol_pre])
         # 3.获取当前持仓占用资金占总资金比例
         total: float = self.get_balance()
         if total == 0:
+            msg = "账户总资金为0，拒绝订单"
+            self.write_log(msg)
+            self.record_order_error(req, msg, gateway_name)
             return False
         ratio: float = frozen / total
         # 4.判断是否超过5%
         if ratio > 0.05:
-            self.write_log(f"品种{vt_symbol}持仓占用资金{frozen}，超过总资金{total}的5%")
+            msg = f"品种{vt_symbol}持仓占用资金{frozen}，超过总资金{total}的5%"
+            self.write_log(msg)
+            self.record_order_error(req, msg, gateway_name)
             return False
         else:
             return True

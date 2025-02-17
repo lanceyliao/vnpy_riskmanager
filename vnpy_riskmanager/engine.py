@@ -100,6 +100,9 @@ class RiskEngine(BaseEngine):
                 if not result:
                     self.write_log(f"风控插件{i}拦截此笔委托")
                     return ""
+                
+        # Add flow count if pass all checks
+        self.order_flow_count += 1
 
         return self._send_order(req, gateway_name)
 
@@ -206,7 +209,7 @@ class RiskEngine(BaseEngine):
         if order.status == Status.REJECTED:
             rejected_reason = getattr(order, 'rejected_reason', '')
             error_info = json.loads(rejected_reason) if rejected_reason else {}
-            error_code = str(error_info.get('code', ''))
+            error_code = int(error_info.get('code', -1))  # 转换为int类型
             error_msg = error_info.get('msg', '')
             
             order_error = OrderErrorData(
@@ -214,7 +217,8 @@ class RiskEngine(BaseEngine):
                 exchange=order.exchange,
                 error_code=error_code,
                 error_msg=error_msg,
-                orderid=order.orderid
+                orderid=order.orderid,
+                gateway_name=order.gateway_name
             )
             
             self.event_engine.put(Event(EVENT_ORDER_ERROR_RECORD, order_error))
@@ -342,6 +346,18 @@ class RiskEngine(BaseEngine):
         event: Event = Event(type=EVENT_LOG, data=log)
         self.event_engine.put(event)
 
+    def record_order_error(self, req: OrderRequest, msg: str, gateway_name: str) -> None:
+        """记录风控拒单信息"""
+        order_error = OrderErrorData(
+            symbol=req.symbol,
+            exchange=req.exchange,
+            error_code=-1,  # 风控拒单统一使用-1
+            error_msg=msg,
+            orderid="-1",   # 风控拒单时还没有orderid
+            gateway_name=gateway_name
+        )
+        self.event_engine.put(Event(EVENT_ORDER_ERROR_RECORD, order_error))
+
     def check_risk(self, req: OrderRequest, gateway_name: str) -> bool:
         """"""
         if not self.active:
@@ -349,37 +365,45 @@ class RiskEngine(BaseEngine):
 
         # Check order volume
         if req.volume <= 0:
-            self.write_log("委托数量必须大于0")
+            msg = "委托数量必须大于0"
+            self.write_log(msg)
+            self.record_order_error(req, msg, gateway_name)
             return False
 
         if req.volume > self.order_size_limit:
-            self.write_log(
-                f"单笔委托数量{req.volume}，超过限制{self.order_size_limit}")
+            msg = f"单笔委托数量{req.volume}，超过限制{self.order_size_limit}"
+            self.write_log(msg)
+            self.record_order_error(req, msg, gateway_name)
             return False
 
         # Check trade volume
         if self.trade_count >= self.trade_limit:
-            self.write_log(
-                f"今日总成交合约数量{self.trade_count}，超过限制{self.trade_limit}")
+            msg = f"今日总成交合约数量{self.trade_count}，超过限制{self.trade_limit}"
+            self.write_log(msg)
+            self.record_order_error(req, msg, gateway_name)
             return False
 
         # Check flow count
         if self.order_flow_count >= self.order_flow_limit:
-            self.write_log(
-                f"委托流数量{self.order_flow_count}，超过限制每{self.order_flow_clear}秒{self.order_flow_limit}次")
+            msg = f"委托流数量{self.order_flow_count}，超过限制每{self.order_flow_clear}秒{self.order_flow_limit}次"
+            self.write_log(msg)
+            self.record_order_error(req, msg, gateway_name)
             return False
 
         # Check all active orders
         active_order_count: int = len(self.main_engine.get_all_active_orders())
         if active_order_count >= self.active_order_limit:
-            self.write_log(
-                f"当前活动委托次数{active_order_count}，超过限制{self.active_order_limit}")
+            msg = f"当前活动委托次数{active_order_count}，超过限制{self.active_order_limit}"
+            self.write_log(msg)
+            self.record_order_error(req, msg, gateway_name)
             return False
 
         # Check order cancel counts
         order_cancel_count: int = self.order_cancel_counts.get(req.vt_symbol, 0)
         if order_cancel_count >= self.order_cancel_limit:
-            self.write_log(f"当日{req.vt_symbol}撤单次数{order_cancel_count}，超过限制{self.order_cancel_limit}")
+            msg = f"当日{req.vt_symbol}撤单次数{order_cancel_count}，超过限制{self.order_cancel_limit}"
+            self.write_log(msg)
+            self.record_order_error(req, msg, gateway_name)
             return False
 
         # Check order self trade
@@ -387,16 +411,18 @@ class RiskEngine(BaseEngine):
         if req.direction == Direction.LONG:
             best_ask: float = order_book.get_best_ask()
             if best_ask and req.price >= best_ask:
-                self.write_log(f"买入价格{req.price}大于等于已挂最低卖价{best_ask}，可能导致自成交")
+                msg = f"买入价格{req.price}大于等于已挂最低卖价{best_ask}，可能导致自成交"
+                self.write_log(msg)
+                self.record_order_error(req, msg, gateway_name)
                 return False
         else:
             best_bid: float = order_book.get_best_bid()
             if best_bid and req.price <= best_bid:
-                self.write_log(f"卖出价格{req.price}小于等于已挂最低买价{best_bid}，可能导致自成交")
+                msg = f"卖出价格{req.price}小于等于已挂最低买价{best_bid}，可能导致自成交"
+                self.write_log(msg)
+                self.record_order_error(req, msg, gateway_name)
                 return False
 
-        # Add flow count if pass all checks
-        self.order_flow_count += 1
         return True
 
     def get_order_book(self, vt_symbol: str) -> "ActiveOrderBook":

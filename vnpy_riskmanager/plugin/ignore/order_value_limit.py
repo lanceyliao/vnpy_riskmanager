@@ -24,14 +24,18 @@ class OrderValueLimit(RiskEngine):
         # 1. 获取当前账户资金
         account_value = self.get_balance(gateway_name)
         if not account_value:
-            self.write_log(f"无法获取账户资金[{gateway_name}]，拒绝订单")
+            msg = f"无法获取账户资金[{gateway_name}]，拒绝订单"
+            self.write_log(msg)
+            self.record_order_error(req, msg, gateway_name)
             return False
             
         # 2. 计算当前订单的价值量
         # 获取合约信息
         contract: Optional[ContractData] = self.main_engine.get_contract(req.vt_symbol)
         if not contract:
-            self.write_log(f"找不到合约信息{req.vt_symbol}，拒绝订单")
+            msg = f"找不到合约信息{req.vt_symbol}，拒绝订单"
+            self.write_log(msg)
+            self.record_order_error(req, msg, gateway_name)
             return False
             
         # 使用合约的size属性(币安为1,CTP为真实合约乘数)
@@ -44,7 +48,9 @@ class OrderValueLimit(RiskEngine):
         
         # 4. 检查是否超过限制
         if order_value > max_order_value:
-            self.write_log(f"订单价值量{order_value:.2f}超过账户限制{max_order_value:.2f}")
+            msg = f"订单价值量{order_value:.2f}超过账户限制{max_order_value:.2f}"
+            self.write_log(msg)
+            self.record_order_error(req, msg, gateway_name)
             return False
             
         return True

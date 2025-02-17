@@ -24,10 +24,14 @@ class SymbolRestriction(RiskEngine):
         # 2. 判断是否在白名单/黑名单中，如果不在白名单，直接drop掉（或者如果在黑名单，直接drop掉）
         symbol = req.vt_symbol.rsplit(".", 1)[0]
         if self.restrict_by_white_list and symbol not in self.restriction_list:
-            self.write_log(f"{symbol}不在白名单中，直接drop掉")
+            msg = f"{symbol}不在白名单中，直接drop掉"
+            self.write_log(msg)
+            self.record_order_error(req, msg, gateway_name)
             return False
         elif not self.restrict_by_white_list and symbol in self.restriction_list:
-            self.write_log(f"{symbol}在黑名单中，直接drop掉")
+            msg = f"{symbol}在黑名单中，直接drop掉"
+            self.write_log(msg)
+            self.record_order_error(req, msg, gateway_name)
             return False
         return True
 
