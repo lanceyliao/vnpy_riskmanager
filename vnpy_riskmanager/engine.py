@@ -14,6 +14,8 @@ from urllib.parse import quote_plus as urlquote
 from datetime import datetime
 
 from vnpy_ctp.gateway.ctp_gateway import CtpTdApi
+from .recorder_engine import OrderErrorData, EVENT_ORDER_ERROR_RECORD
+import json
 
 APP_NAME = "RiskManager"
 
@@ -190,7 +192,7 @@ class RiskEngine(BaseEngine):
         self.event_engine.register(EVENT_ORDER, self.process_order_event)
 
     def process_order_event(self, event: Event) -> None:
-        """"""
+        """处理委托事件"""
         order: OrderData = event.data
 
         order_book: ActiveOrderBook = self.get_order_book(order.vt_symbol)
@@ -199,6 +201,23 @@ class RiskEngine(BaseEngine):
         if order.status != Status.CANCELLED:
             return
         self.order_cancel_counts[order.vt_symbol] += 1
+
+        # 如果订单被拒绝,记录拒单信息并发送至recorder_engine
+        if order.status == Status.REJECTED:
+            rejected_reason = getattr(order, 'rejected_reason', '')
+            error_info = json.loads(rejected_reason) if rejected_reason else {}
+            error_code = str(error_info.get('code', ''))
+            error_msg = error_info.get('msg', '')
+            
+            order_error = OrderErrorData(
+                symbol=order.symbol,
+                exchange=order.exchange,
+                error_code=error_code,
+                error_msg=error_msg,
+                orderid=order.orderid
+            )
+            
+            self.event_engine.put(Event(EVENT_ORDER_ERROR_RECORD, order_error))
 
     def process_trade_event(self, event: Event) -> None:
         """"""
